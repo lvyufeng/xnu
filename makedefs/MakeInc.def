@@ -21,15 +21,19 @@ SUPPORTED_KERNEL_CONFIGS = RELEASE DEVELOPMENT DEBUG PROFILE KASAN
 # Machine Configuration options
 #
 
-SUPPORTED_X86_64_MACHINE_CONFIGS = NONE
-SUPPORTED_X86_64H_MACHINE_CONFIGS = NONE
+# GAUGUIN (Redmi Note 9 Pro 5G, SM7125) is listed for every architecture:
+# 'make installhdrs ARCH_CONFIGS="X86_64 ARM64"' asks for a host pass with
+# DEFAULT = NONE too, and the validation below rejects any TARGET_CONFIGS
+# whose machine config is not in SUPPORTED_<ARCH>_MACHINE_CONFIGS.
+SUPPORTED_X86_64_MACHINE_CONFIGS = NONE GAUGUIN
+SUPPORTED_X86_64H_MACHINE_CONFIGS = NONE GAUGUIN
 
 ifneq ($(findstring _Sim,$(RC_ProjectName)),)
-SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+SUPPORTED_ARM64_MACHINE_CONFIGS = NONE GAUGUIN
 else ifneq ($(findstring _host,$(RC_ProjectName)),)
-SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+SUPPORTED_ARM64_MACHINE_CONFIGS = NONE GAUGUIN
 else
-SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE
+SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE SWEET GAUGUIN
 
 endif
 
@@ -61,6 +65,10 @@ MACHINE_FLAGS_ARM64_T8103 = -DARM64_BOARD_CONFIG_T8103                  -mcpu=ap
 MACHINE_FLAGS_ARM64_T6000 = -DARM64_BOARD_CONFIG_T6000 		-mcpu=apple-a14
 MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a
 MACHINE_FLAGS_ARM64_BCM2837 = -DARM64_BOARD_CONFIG_BCM2837
+MACHINE_FLAGS_ARM64_SWEET = -DARM64_BOARD_CONFIG_SWEET                -march=armv8.2-a+crypto
+# gauguin (Redmi Note 9 Pro 5G, SM7125): same board config, board layout
+# differences are #if defined(GAUGUIN) in bsd/dev/sweet_*.c
+MACHINE_FLAGS_ARM64_GAUGUIN = -DARM64_BOARD_CONFIG_SWEET -DGAUGUIN     -march=armv8.2-a+crypto
 
 
 #
@@ -259,7 +267,11 @@ ifeq ($(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG),)
 # Without embdedded device map, use a default arch string
 export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := $(shell echo $(CURRENT_ARCH_CONFIG) | tr A-Z a-z)
 ifneq ($(filter arm64,$(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG)),)
+# sweet's Cortex-A76/A55 (gauguin: Kryo 465/265) have no pointer
+# authentication: stay plain arm64
+ifeq ($(filter SWEET GAUGUIN,$(CURRENT_MACHINE_CONFIG)),)
 export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64e
+endif
 endif
 
 endif
@@ -306,7 +318,6 @@ CFLAGS_GEN = $(DEBUG_CFLAGS) -nostdinc \
 	-fno-builtin \
 	-fno-common \
 	-ftrivial-auto-var-init=zero \
-	-enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang \
 	-fsigned-bitfields \
 	-fmerge-all-constants \
 	-fno-c++-static-destructors \

@@ -266,10 +266,27 @@ _cnputc(char c, bool poll)
  *             waiting for an interrupt when the hardware device isn't ready
  * @param size The number of characters to print to the console.
  */
+#if defined(ARM64_BOARD_CONFIG_SWEET)
+extern void sweet_log_append(const char *c, int size);  /* bsd/dev/sweet_ufs.c */
+/*
+ * Set by AppleCLCD (boot-arg sweetfb_noconsole=1) once the GUI presents:
+ * console text still goes to the persistent log, but is not drawn over
+ * the GUI. A panic draws again.
+ */
+int sweet_console_muted;
+#endif
+
 static inline void
 _cnputs(char *c, int size, bool poll)
 {
 	extern int disableConsoleOutput;
+
+#if defined(ARM64_BOARD_CONFIG_SWEET)
+	sweet_log_append(c, size);
+	if (sweet_console_muted && !panic_active()) {
+		return;
+	}
+#endif
 
 	if (disableConsoleOutput) {
 		return;

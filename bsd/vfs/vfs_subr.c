@@ -1257,6 +1257,18 @@ vfs_mountroot(void)
 
 		mp = vfs_rootmountalloc_internal(vfsp, "root_device");
 		mp->mnt_devvp = rootvp;
+#if defined(ARM64_BOARD_CONFIG_SWEET)
+		/*
+		 * SWEET has no data volume: /private/var lives on the root, so
+		 * boot-arg rootrw=1 mounts it read-write from the start.
+		 */
+		{
+			uint32_t rootrw = 0;
+			if (PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw)) && rootrw) {
+				mp->mnt_flag &= ~MNT_RDONLY;
+			}
+		}
+#endif
 
 		if (vfsp->vfc_mountroot) {
 			error = (*vfsp->vfc_mountroot)(mp, rootvp, ctx);
@@ -11021,7 +11033,7 @@ rmdir_remove_orphaned_appleDouble(vnode_t vp, vfs_context_t ctx, int * restart_f
 	uio_t auio = NULL;
 	int eofflag, siz = UIO_BUFF_SIZE, alloc_size = 0, nentries = 0;
 	int open_flag = 0, full_erase_flag = 0;
-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+	UIO_STACKBUF(uio_buf, 1);
 	char *rbuf = NULL;
 	void *dir_pos;
 	void *dir_end;

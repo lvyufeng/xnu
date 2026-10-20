@@ -1884,6 +1884,20 @@ proc_prepareexit(proc_t p, int rv, boolean_t perf_notify)
 		subcode = ut->uu_subcode;
 		etype = ut->uu_exception;
 
+#if defined(ARM64_BOARD_CONFIG_SWEET)
+		if (p == current_proc()) {
+			extern void sweet_crash_log(const char *, int, int, uint64_t, uint64_t);
+			sweet_crash_log(p->p_comm, proc_getpid(p), WTERMSIG(rv),
+			    ((uint64_t)ut->uu_exception << 32) | (uint32_t)ut->uu_code, ut->uu_subcode);
+			/* abort_with_payload messages (_objc_fatal, os_crash_fmt, ...) */
+			if (PROC_HAS_EXITREASON(p)) {
+				char *desc = exit_reason_get_string_desc(p->p_exit_reason);
+				printf("CRASH %s reason ns %u code 0x%llx: %s\n", p->p_comm,
+				    p->p_exit_reason->osr_namespace, p->p_exit_reason->osr_code,
+				    desc != NULL ? desc : "(none)");
+			}
+		}
+#endif
 		/* Defualt to EXC_CRASH if the exception is not an EXC_RESOURCE or EXC_GUARD */
 		if (etype != EXC_RESOURCE || etype != EXC_GUARD) {
 			etype = EXC_CRASH;

@@ -143,8 +143,8 @@ LEXT(reset_vector)
 	adrp	x19, EXT(ResetHandlerData)@page			// Get address of the reset handler data
 	add		x19, x19, EXT(ResetHandlerData)@pageoff
 	mrs		x15, MPIDR_EL1						// Load MPIDR to get CPU number
-#if HAS_CLUSTER
-	and		x0, x15, #0xFFFF					// CPU number in Affinity0, cluster ID in Affinity1
+#if HAS_CLUSTER || defined(SWEET)
+	and		x0, x15, #0xFFFF					// Full Aff1:Aff0 (SWEET: core in Aff1)
 #else
 	and		x0, x15, #0xFF						// CPU number is in MPIDR Affinity Level 0
 #endif
@@ -198,8 +198,8 @@ Lskip_cpu_reset_handler:
 	.align 3
 	.global EXT(LowResetVectorEnd)
 LEXT(LowResetVectorEnd)
-	.global	EXT(SleepToken)
 #if WITH_CLASSIC_S2R
+	.global	EXT(SleepToken)
 LEXT(SleepToken)
 	.space	(stSize_NUM),0
 #endif
@@ -279,6 +279,56 @@ LEXT(LowExceptionVectorBase)
 LEXT(bootstrap_instructions)
 
 #endif /* defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) */
+#if defined(SWEET)
+/* PSCI CPU_ON entry (physical): x0=context_id, no stack, MMU/caches off.
+ * Keep this separate from __start (which requires x0=boot_args PA).
+ * Firmware may return at EL1 or EL2; check before accessing EL1 state.
+ * The EL2 path assumes no resident hypervisor and CNTVOFF_EL2=0 on boot.
+ */
+	.align 2
+	.globl EXT(sweet_secondary_entry)
+LEXT(sweet_secondary_entry)
+	msr		DAIFSet, #0xf
+	mrs		x1, CurrentEL
+	cmp		x1, #0x4
+	b.eq	Lsweet_secondary_el1
+	cmp		x1, #0x8
+	b.ne	Lsweet_secondary_bad_el
+	adrp	x1, EXT(LowExceptionVectorBase)@page
+	add		x1, x1, EXT(LowExceptionVectorBase)@pageoff
+	msr		VBAR_EL2, x1
+	/* No stage 2, AArch64 EL1, no EL2 interrupt or FP/debug traps. */
+	mov		x1, #(1 << 31)
+	msr		HCR_EL2, x1
+	msr		VTTBR_EL2, xzr
+	msr		CPTR_EL2, xzr
+	msr		MDCR_EL2, xzr
+	mov		x1, #3
+	msr		CNTHCTL_EL2, x1
+	msr		CNTVOFF_EL2, xzr
+	/* Permit ICC_SRE_EL1 and GIC CPU interface system-register access. */
+	mrs		x1, ICC_SRE_EL2
+	orr		x1, x1, #1
+	orr		x1, x1, #8
+	msr		ICC_SRE_EL2, x1
+	/* Known Armv8 SCTLR RES1 bits, M/C/I off, little endian. */
+	MOV64	x1, 0x30d00800
+	msr		SCTLR_EL1, x1
+	isb
+	adrp	x1, Lsweet_secondary_el1@page
+	add		x1, x1, Lsweet_secondary_el1@pageoff
+	msr		ELR_EL2, x1
+	mov		x1, #0x3c5			// DAIF masked, AArch64 EL1h
+	msr		SPSR_EL2, x1
+	eret
+Lsweet_secondary_bad_el:
+	b		.
+Lsweet_secondary_el1:
+	/* x0 is deliberately unused; reset_vector selects CPU data by MPIDR. */
+	msr		SPSel, #1
+	b		EXT(LowResetVectorBase)
+#endif /* SWEET */
+
 	.align 2
 	.globl EXT(resume_idle_cpu)
 LEXT(resume_idle_cpu)
@@ -463,6 +513,25 @@ LEXT(start_first_cpu)
 	mov		x20, x0
 	mov		x21, #0
 
+#if defined(SWEET)
+	/* Stage 0: white 64x32 band, no stack or page tables needed. */
+	MOV64	x0, (0x9c000000 + 2368 * 4320)
+	mov		w1, #-1
+	mov		x2, #32
+	mov		x4, #4320
+Lsweet_mark_row:
+	mov		x3, #64
+	mov		x5, x0
+Lsweet_mark_pixel:
+	str		w1, [x5], #4
+	subs	x3, x3, #1
+	b.ne	Lsweet_mark_pixel
+	add		x0, x0, x4
+	subs	x2, x2, #1
+	b.ne	Lsweet_mark_row
+	dsb		sy
+#endif
+
 	// Set low reset vector before attempting any loads
 	adrp	x0, EXT(LowExceptionVectorBase)@page
 	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
@@ -609,6 +678,23 @@ Lkernelcache_base_found:
 	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
 	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
 
+#if defined(SWEET)
+	/*
+	 * Splash framebuffer: one 32MB Normal-NC block in the EXISTING V=P
+	 * L2 table. Both framebuffer and RAM use L1 index 0; another call to
+	 * create_bootstrap_mapping would replace the RAM L2 table.
+	 * SWEET uses 16K pages and all bring-up RAM is below 4GB, so the first
+	 * V=P L2 page is bootstrap_pagetables + 2*PGBYTES.
+	 */
+	MOV64	x10, 0x9c000000
+	MOV64	x11, (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
+	orr		x11, x11, x10
+	and		x12, x10, #(ARM_TT_L2_INDEX_MASK)
+	lsr		x12, x12, #(ARM_TT_L2_SHIFT)
+	add		x13, x25, #(2 * PGBYTES)
+	str		x11, [x13, x12, lsl #TTE_SHIFT]
+#endif
+
 	/* Ensure TTEs are visible */
 	dsb		ish
 
@@ -707,6 +793,12 @@ common_start:
 	ic		iallu
 #endif
 
+#if defined(SWEET)
+	/* Complete local TLB/I-cache invalidation before enabling the MMU. */
+	dsb		sy
+	isb
+#endif
+
 	/* If x21 is not 0, then this is either the start_cpu path or
 	 * the resume_idle_cpu path.  cpu_ttep should already be
 	 * populated, so just switch to the kernel_pmap now.
@@ -745,11 +837,11 @@ common_start:
 	MSR_SCTLR_EL1_X0
 	isb		sy
 
-#if !VMAPPLE
+#if !VMAPPLE && !defined(SWEET)
 	MOV64   x1, SCTLR_EL1_DEFAULT
 	cmp		x0, x1
 	bne		.
-#endif /* !VMAPPLE */
+#endif /* !VMAPPLE && !SWEET */
 
 #if (!CONFIG_KERNEL_INTEGRITY || (CONFIG_KERNEL_INTEGRITY && !defined(KERNEL_INTEGRITY_WT)))
 	/* Watchtower

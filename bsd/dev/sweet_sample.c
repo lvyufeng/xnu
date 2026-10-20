@@ -11,13 +11,7 @@
  * syscall stub in pc and its caller in lr/bt.
  *
  * First sample 90 s after start, then every 120 s, 40 samples at most.
- *
- * SWEET-only: the xnu Makefile includes every `standard` file into every
- * machine config (dxb's VMAPPLE bootstrap does too), and the entry point
- * sweet_sample_task lives in osfmk/kern/exception.c inside the SWEET guard,
- * so the whole file must be compiled out elsewhere or the link fails.
  */
-#if defined(ARM64_BOARD_CONFIG_SWEET)
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
@@ -92,4 +86,3 @@ sweet_sample_start(void)
 		thread_deallocate(thread);
 	}
 }
-#endif /* ARM64_BOARD_CONFIG_SWEET */
