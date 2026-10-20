@@ -990,9 +990,13 @@ sweet_crash_strings(const char *name)
 	printf("STR done: %llu KiB scanned, %d strings\n", scanned >> 10, lines);
 	kfree_data(buf, 65536);
 }
+#endif /* ARM64_BOARD_CONFIG_SWEET */
+
 /*
  * SWEET process sampler (bsd/dev/sweet_sample.c): user pc/lr/sp and a frame
  * pointer backtrace of every thread of a task, from the saved user state.
+ * Kept outside the SWEET guard so bsd/dev/sweet_sample.c (a `standard` file
+ * in every machine config) links; it is never called on other boards.
  */
 void sweet_sample_task(const char *name, int pid, task_t task);
 
@@ -1039,8 +1043,6 @@ sweet_sample_task(const char *name, int pid, task_t task)
 	}
 	task_unlock(task);
 }
-
-#endif /* ARM64_BOARD_CONFIG_SWEET */
 
 kern_return_t
 bsd_exception(
