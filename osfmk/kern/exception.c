@@ -992,6 +992,7 @@ sweet_crash_strings(const char *name)
 }
 #endif /* ARM64_BOARD_CONFIG_SWEET */
 
+#if defined(ARM64_BOARD_CONFIG_SWEET)
 /*
  * SWEET process sampler (bsd/dev/sweet_sample.c): user pc/lr/sp and a frame
  * pointer backtrace of every thread of a task, from the saved user state.
@@ -1043,6 +1044,17 @@ sweet_sample_task(const char *name, int pid, task_t task)
 	}
 	task_unlock(task);
 }
+#else /* !ARM64_BOARD_CONFIG_SWEET */
+/* bsd/dev/sweet_sample.c is a standard file in every machine config;
+ * its entry point must exist (and never be called) off the SWEET board. */
+void
+sweet_sample_task(const char *name, int pid, task_t task)
+{
+	(void)name;
+	(void)pid;
+	(void)task;
+}
+#endif /* ARM64_BOARD_CONFIG_SWEET */
 
 kern_return_t
 bsd_exception(
